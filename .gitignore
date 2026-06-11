@@ -1,0 +1,10 @@
+# Saved session files contain live auth cookies — never commit them.
+trendlyne_session.json
+*.session.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
