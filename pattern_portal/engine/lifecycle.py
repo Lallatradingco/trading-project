@@ -25,6 +25,7 @@ from .model import Candidate, Line
 from .pivots import atr_pct, multi_scale_pivots, zigzag
 
 HOLD_BARS = 10          # a breakout must hold this long to stay Confirmed
+MAX_WAIT = {"1D": 60, "1W": 26, "1M": 12}   # longest wait for a breakout after the shape completes
 CHART_POINTS = 160      # max closes stored per pattern for the mini chart
 
 
@@ -55,8 +56,9 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
     bo = level = None
     sgn = 0
     marg = None
+    expiry = min(cand.expiry, cand.end + MAX_WAIT.get(ctx.tf, 60))
     for t in range(cand.end + 1, n):
-        if t > cand.expiry:
+        if t > expiry:
             return None
         hit = None
         if bull is not None and c[t] > bull.at(t):
@@ -78,7 +80,7 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
 
     status = "Forming"
     if bo is None:
-        if n - 1 > cand.expiry:
+        if n - 1 > expiry:
             return None
         if marg is not None and marg[0] == n - 1:
             status = "Marginal"
@@ -90,8 +92,8 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
             if sgn * (c[t] - level) / level < -0.25 * d:
                 status = "Failed"
                 break
-        if status == "Confirmed" and bo == n - 1:
-            status = "Marginal"            # decisive close today, follow-through pending
+        if status == "Confirmed" and n - 1 - bo < 2:
+            status = "Marginal"            # needs two closes after the break to count as held
 
     direction = cand.bias if sgn == 0 else ("bull" if sgn == 1 else "bear")
     # Levels: where a close completes the pattern, the measured target, the stop.
@@ -105,8 +107,23 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
         stop = cand.stop_dn
     else:
         entry = target = stop = None
+    if entry is not None and entry <= 0:
+        return None                      # a sloped line projected below zero: not a usable level
     if target is not None and target <= 0:
         target = None
+    # A stop taken from an old swing can sit on the wrong side of a sloped
+    # breakout line; fall back to the opposite boundary, then to half the height.
+    if entry is not None and stop is not None and sgn_dir(direction) * (entry - stop) <= 0:
+        x = n - 1 if bo is None else bo
+        opp = cand.dn if direction == "bull" else cand.up
+        height = cand.height_up if direction == "bull" else cand.height_dn
+        alt = opp.at(x) if opp is not None else None
+        if alt is not None and sgn_dir(direction) * (entry - alt) > 0:
+            stop = alt
+        else:
+            stop = entry - sgn_dir(direction) * 0.5 * height
+    if stop is not None and stop <= 0:
+        stop = None
     rr = None
     if entry is not None and target is not None and stop is not None:
         risk = abs(entry - stop)
@@ -133,15 +150,18 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
     segs = list(cand.segments)
     x0 = cand.line_x0 if cand.line_x0 is not None else cand.start
     x_end = bo if bo is not None else n - 1
-    for line, kind in ((cand.up, "upper"), (cand.dn, "lower")):
+    for line, kind, lx0 in ((cand.up, "upper", cand.up_x0), (cand.dn, "lower", cand.dn_x0)):
         if line is None:
             continue
         is_break = (line is bull) or (line is bear)
+        if not is_break and not cand.other_is_boundary:
+            continue                      # an invalidation level, not part of the drawing
         if not is_break:
-            continue
-        if line.m == 0 and cand.pattern not in ("Rectangle",):
+            kind = "bound"
+        elif line.m == 0 and cand.pattern != "Rectangle":
             kind = "neck" if cand.family != "Curve & Cup" else "rim"
-        segs.append({"kind": kind, "x1": int(x0), "y1": float(line.at(x0)),
+        xs = lx0 if lx0 is not None else x0
+        segs.append({"kind": kind, "x1": int(xs), "y1": float(line.at(xs)),
                      "x2": int(x_end), "y2": float(line.at(x_end))})
 
     event = bo if bo is not None else cand.end
@@ -152,12 +172,20 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
     else:
         w1 = min(n - 1, event + max(15, span // 2))
     step = max(1, math.ceil((w1 - w0 + 1) / CHART_POINTS))
-    closes = c[w0:w1 + 1:step]
+    # sample forward from w0 and always include w1, so both the pattern's first
+    # bar and the latest close are on the chart; x holds each sample's bar index
+    xs = list(range(w0, w1 + 1, step))
+    if xs[-1] != w1:
+        xs.append(w1)
+    closes = c[xs]
 
-    lv_up = cand.up.at(n - 1) if (cand.bias == "neutral" and cand.up is not None) else None
-    lv_dn = cand.dn.at(n - 1) if (cand.bias == "neutral" and cand.dn is not None) else None
+    # live range levels only for shapes that haven't picked a direction yet
+    lv_up = cand.up.at(n - 1) if (direction == "neutral" and cand.up is not None) else None
+    lv_dn = cand.dn.at(n - 1) if (direction == "neutral" and cand.dn is not None) else None
+    if direction == "neutral" and any(v is not None and v <= 0 for v in (lv_up, lv_dn)):
+        return None
 
-    return {
+    return sanitize({
         "pattern": cand.pattern,
         "family": cand.family,
         "direction": direction,
@@ -179,9 +207,23 @@ def evaluate(cand: Candidate, ctx: Ctx, volume: Optional[np.ndarray]) -> Optiona
         "volume_confirmed": vol_ok,
         "points": [[int(i), round(float(p), 2), lab] for i, p, lab in cand.points],
         "segments": [{**s, "y1": round(s["y1"], 2), "y2": round(s["y2"], 2)} for s in segs],
-        "chart": {"i0": int(w0), "step": int(step), "c": [round(float(v), 2) for v in closes]},
+        "chart": {"i0": int(w0), "step": int(step), "x": [int(v) for v in xs],
+                  "c": [round(float(v), 2) for v in closes]},
         "scale": cand.scale,
-    }
+    })
+
+
+def sanitize(r: dict) -> dict:
+    """After rounding to paise, drop a stop that equals the entry and a target at or below zero."""
+    if r["breakout"] is not None and r["stop"] is not None and r["stop"] == r["breakout"]:
+        r["stop"], r["rr"], r["outcome"] = None, None, None
+    if r["target"] is not None and r["target"] <= 0:
+        r["target"], r["rr"], r["outcome"] = None, None, None
+    return r
+
+
+def sgn_dir(direction: str) -> int:
+    return 1 if direction == "bull" else -1
 
 
 def _r(v):
@@ -248,7 +290,7 @@ def analyze(df: pd.DataFrame, tf: str = "1D") -> list[dict]:
         r["breakout_date"] = _d(dates[r["breakout_idx"]]) if r["breakout_idx"] is not None else None
         r["bars_ago"] = len(df) - 1 - r["event_idx"]
         r["chart"]["d0"] = _d(dates[r["chart"]["i0"]])
-        r["chart"]["d1"] = _d(dates[min(len(df) - 1, r["chart"]["i0"] + r["chart"]["step"] * (len(r["chart"]["c"]) - 1))])
+        r["chart"]["d1"] = _d(dates[r["chart"]["x"][-1]])
     return out
 
 

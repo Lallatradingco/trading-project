@@ -27,9 +27,11 @@ INDEX_URLS = {
 FNO_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
 EQUITY_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 
-UNIVERSES = ("nifty50", "nifty100", "nifty200", "fno", "nifty500", "all")
+UNIVERSES = ("nifty50", "nifty100", "nifty200", "fno", "nifty500",
+             "liq100", "liq200", "liq500", "all")
 LABELS = {"nifty50": "Nifty 50", "nifty100": "Nifty 100", "nifty200": "Nifty 200",
-          "fno": "F&O", "nifty500": "Nifty 500", "all": "All stocks"}
+          "fno": "F&O", "nifty500": "Nifty 500", "liq100": "Top 100 by turnover",
+          "liq200": "Top 200 by turnover", "liq500": "Top 500 by turnover", "all": "All stocks"}
 
 
 def _get(session: requests.Session, url: str) -> str:

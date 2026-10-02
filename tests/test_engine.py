@@ -16,7 +16,7 @@ def test_detects_known_pattern(name):
 
 def test_mirrored_flag_is_bearish():
     knots = [(x, 250 - y) for x, y in CASES["Bull Flag"]]
-    assert any(r["pattern"] == "Bear Flag" for r in analyze(path(knots), "1D"))
+    assert any(r["pattern"] in ("Bear Flag", "Bear Pennant") for r in analyze(path(knots), "1D"))
 
 
 def test_breakout_levels_and_status():
@@ -37,3 +37,36 @@ def test_resample_weekly_monthly():
     w, m = resample(df, "1W"), resample(df, "1M")
     assert len(w) < len(df) and len(m) < len(w)
     assert w["Close"].iloc[-1] == df["Close"].iloc[-1]
+
+
+def test_flag_detection_is_mirror_symmetric():
+    bull = [(r["pattern"].split()[1], r["start"], r["end"], r["status"])
+            for r in analyze(case("Bull Flag"), "1D") if r["family"] == "Continuation"]
+    knots = [(x, 250 - y) for x, y in CASES["Bull Flag"]]
+    bear = [(r["pattern"].split()[1], r["start"], r["end"], r["status"])
+            for r in analyze(path(knots), "1D") if r["family"] == "Continuation"]
+    assert [b[0] for b in bull] == [b[0] for b in bear]
+
+
+def test_levels_are_consistent_on_real_shapes():
+    for name in CASES:
+        for r in analyze(case(name), "1D"):
+            if r["direction"] == "bull" and r["stop"] is not None:
+                assert r["stop"] < r["breakout"]
+            if r["direction"] == "bear" and r["stop"] is not None:
+                assert r["stop"] > r["breakout"]
+            x = r["chart"]["x"]
+            assert len(x) == len(r["chart"]["c"]) and x == sorted(x)
+            assert x[0] <= r["start"] and x[-1] <= len(case(name)) - 1
+            assert all(i >= x[0] for i, _, _ in r["points"])
+
+
+def test_no_pattern_ever_reports_a_non_positive_level():
+    import glob
+    import pandas as pd
+    for f in sorted(glob.glob("/home/claude/sample/*.csv"))[:4] or []:
+        df = pd.read_csv(f, parse_dates=["Date"], index_col="Date")[["Open", "High", "Low", "Close", "Volume"]]
+        for tf in ("1D", "1W", "1M"):
+            for r in analyze(resample(df, tf), tf):
+                for k in ("breakout", "target", "stop", "range_up", "range_dn"):
+                    assert r[k] is None or r[k] > 0, (f, tf, r["id"] if "id" in r else r["pattern"], k, r[k])

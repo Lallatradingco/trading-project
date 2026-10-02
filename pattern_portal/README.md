@@ -66,6 +66,41 @@ How it works (`engine/`):
 
 Results are pattern-recognition output, not trade advice.
 
+## Conviction ratio
+
+Every stock gets a bullish share of its chart evidence (`engine/conviction.py`):
+
+- Each live pattern (forming, marginal, confirmed with the trade still open, or a
+  failed breakout in the last 30 daily / 12 weekly / 6 monthly candles) adds
+  `quality × status × timeframe × recency × measured hit rate × volume`.
+  Failed breakouts count towards the opposite side. Unbroken shapes count less
+  the further price still is from the breakout level.
+- The hit rate is measured on the scan itself: how often that pattern type on
+  that timeframe reached its target before its stop across all NSE stocks
+  (a failed breakout counts as a loss), shrunk towards the market average when
+  cases are few.
+- Trend adds a smaller share: close vs 50/200-day averages, 50 vs 200, 20-day return.
+- Ratio = (bull + 0.5) / (bull + bear + 1). 75%+ strong bullish, 60%+ bullish,
+  40–60 mixed, 25–40 bearish, under 25 strong bearish. Evidence strength
+  (low/medium/high) says how much weight sits behind the reading.
+
+## Intraday picks
+
+A next-session watchlist from daily patterns (there is no intraday feed):
+liquid stocks (₹5 cr+ median daily value) whose daily pattern trigger is within
+one ATR of the last close, or which broke out in the last three sessions.
+Stop = 0.5 ATR, target = 1 ATR (or the pattern's own levels when tighter), so
+R:R is about 1:2. Ranked by trigger proximity (30%), shape quality (20%),
+measured hit rate (20%), agreement with the stock's conviction (20%) and
+volume pick-up (10%).
+
+## Hosted read-only copy
+
+`python -m pattern_portal export OUT` writes `OUT/index.html` and `OUT/data/`
+(recent patterns with charts, full light history, conviction, picks). The same
+front end runs on those files with filtering done in the browser, so it can be
+hosted anywhere static.
+
 ## Layout
 
 ```
@@ -80,6 +115,6 @@ pattern_portal/
 tests/          synthetic-pattern tests: python -m pytest tests
 ```
 
-API: `GET /api/patterns` (filters: universe, q, family, direction, tf, status,
+API: `GET /api/intraday`, `GET /api/stocks`, `GET /api/lists`, `GET /api/patterns` (filters: universe, q, family, direction, tf, status,
 quality, within, volume, sort, page), `GET /api/stock/<SYMBOL>`, `GET /api/meta`,
 `POST /api/scan`. These are what a later Lalla Hub integration would call.

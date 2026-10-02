@@ -74,6 +74,9 @@ class Candidate:
     line_x0: Optional[int] = None      # where to start drawing the breakout line(s)
     target_up: Optional[float] = None  # fixed target price (overrides the measured move)
     target_dn: Optional[float] = None
+    up_x0: Optional[int] = None        # first bar of each boundary line, if not line_x0
+    dn_x0: Optional[int] = None
+    other_is_boundary: bool = False    # draw the non-breakout line too (triangles, flags...)
 
     @property
     def family(self) -> str:

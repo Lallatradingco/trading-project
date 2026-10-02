@@ -2,23 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pattern Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lalla Pattern Scanner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<!--PAGE-->
 <header class="top">
   <div class="brand">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 4-7 5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     <span>Pattern Scanner</span>
   </div>
+  <nav class="views" aria-label="Views">
+    <button data-view="patterns" aria-pressed="true">Patterns</button>
+    <button data-view="intraday" aria-pressed="false">Intraday picks</button>
+    <button data-view="conviction" aria-pressed="false">Conviction</button>
+  </nav>
   <span id="mkt" class="mkt"></span>
   <label class="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2"/></svg>
-    <input id="q" type="search" placeholder="Search a stock or company" autocomplete="off">
+    <input id="q" type="search" placeholder="Search a stock" autocomplete="off" aria-label="Search a stock">
   </label>
   <div class="top-right">
     <span id="job" class="job" hidden></span>
@@ -33,7 +39,7 @@
 
 <section class="stats" id="stats" aria-label="Summary"></section>
 
-<main class="layout">
+<main class="layout" id="layout">
   <aside class="filters" id="filters" aria-label="Filters">
     <div class="filters-head"><h2>Filters</h2><button id="reset" class="link">Reset</button></div>
     <div class="fgroup"><h3>Pattern family</h3><div class="chips" data-facet="family"></div>
@@ -52,7 +58,7 @@
     </div>
   </aside>
 
-  <section class="results" aria-label="Patterns">
+  <section class="results view" id="view-patterns" aria-label="Patterns">
     <div class="results-head">
       <p id="count" class="count"></p>
       <div class="tabs" role="tablist" aria-label="Sort">
@@ -66,10 +72,63 @@
     <div class="more"><button id="more" class="btn ghost" hidden>Show more patterns</button></div>
   </section>
 
+  <section class="view" id="view-intraday" aria-label="Intraday picks" hidden>
+    <div class="vhead">
+      <h2>Intraday picks for the next session</h2>
+      <p>Daily patterns that can trigger within one day's range, ranked by how close the trigger is, shape quality, the pattern's measured hit rate, the stock's conviction and volume. Liquid stocks only (median daily value traded of ₹5 crore or more).</p>
+    </div>
+    <div class="iv-cols">
+      <div class="iv-col"><h3 class="up">Bullish setups</h3><div id="iv-bull" class="iv-list"></div></div>
+      <div class="iv-col"><h3 class="down">Bearish setups</h3><div id="iv-bear" class="iv-list"></div></div>
+    </div>
+    <div class="method">
+      <h3>How to read a pick</h3>
+      <ul>
+        <li><b>Trigger</b> is the pattern's breakout level. A breakout trigger fires only if price trades through it; a fresh-breakout pick uses the last close as its reference.</li>
+        <li><b>Stop</b> is half a day's average range (ATR 14) beyond the trigger, or the pattern's own stop if that is tighter. <b>Target</b> is one ATR, or the pattern target if nearer.</li>
+        <li><b>Hit rate</b> is how often this pattern on daily charts reached its full target before its stop across all scanned NSE stocks. It describes the pattern type, not this trade.</li>
+        <li>Built from daily candles. There is no live intraday feed here, so check the price action at the open before acting.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="view" id="view-conviction" aria-label="Conviction" hidden>
+    <div class="vhead">
+      <h2>Conviction by stock</h2>
+      <p>Bullish share of the chart evidence on each stock: live patterns weighted by shape quality, status, timeframe, recency and measured hit rate, plus a smaller trend component (50- and 200-day averages, 20-session return). 50% means the evidence is balanced.</p>
+    </div>
+    <div class="cv-tools">
+      <div class="chips" id="cv-filter" role="group" aria-label="Reading">
+        <button class="chip" data-v="all" aria-pressed="true">All readings</button>
+        <button class="chip" data-v="bull" aria-pressed="false">Bullish</button>
+        <button class="chip" data-v="bear" aria-pressed="false">Bearish</button>
+        <button class="chip" data-v="strong" aria-pressed="false">Strong only</button>
+      </div>
+      <label class="check"><input type="checkbox" id="cv-liquid" checked> Only stocks trading ₹1 crore or more a day</label>
+      <label class="check"><input type="checkbox" id="cv-trend"> Include stocks with no live pattern</label>
+    </div>
+    <div class="table-wrap">
+      <table class="cv-table">
+        <thead><tr>
+          <th data-k="symbol">Stock</th>
+          <th data-k="conv" class="num">Conviction</th>
+          <th data-k="label">Reading</th>
+          <th data-k="evidence" class="num">Evidence</th>
+          <th data-k="live" class="num">Live patterns</th>
+          <th data-k="last_close" class="num">Last close</th>
+          <th data-k="ret20" class="num">20-session</th>
+          <th data-k="turnover_cr" class="num">Value traded</th>
+        </tr></thead>
+        <tbody id="cv-body"></tbody>
+      </table>
+    </div>
+    <div class="more"><button id="cv-more" class="btn ghost" hidden>Show more stocks</button></div>
+  </section>
+
   <aside class="detail" id="detail" aria-label="Stock detail" aria-live="polite">
     <div class="empty-detail">
       <svg viewBox="0 0 120 60" aria-hidden="true"><path d="M5 50 Q35 5 60 25 T115 12" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-      <p>Pick a pattern to see its chart, levels and this stock's pattern history.</p>
+      <p>Pick a pattern or a stock to see its chart, conviction and pattern history.</p>
     </div>
   </aside>
 </main>
@@ -90,9 +149,10 @@
     </dl>
     <footer><span class="when"></span><span class="rr"></span></footer>
     <footer class="sub"><span class="ql"></span><span class="vs"></span></footer>
+    <div class="cvrow"><span class="cvbar"><i></i></span><span class="cvtxt"></span></div>
   </article>
 </template>
-
+<!--/PAGE-->
 <script src="/static/app.js"></script>
 </body>
 </html>

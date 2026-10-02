@@ -21,13 +21,14 @@ import pandas as pd
 
 from . import config, data
 from .engine import analyze
+from .engine import conviction as cv
 
 log = logging.getLogger(__name__)
 
 INDEX_COLS = ["id", "symbol", "tf", "pattern", "family", "direction", "status", "quality",
               "score", "breakout", "target", "stop", "rr", "range_up", "range_dn", "bars_ago",
               "start_date", "end_date", "event_date", "breakout_date", "span", "volume_confirmed",
-              "outcome", "last_close", "vs_breakout"]
+              "outcome", "last_close", "vs_breakout", "breakout_idx"]
 
 
 def _scan_one(sym: str, timeframes: tuple[str, ...]) -> dict:
@@ -54,6 +55,7 @@ def _scan_one(sym: str, timeframes: tuple[str, ...]) -> dict:
         out += recs
     info = {
         "symbol": sym,
+        "metrics": cv.stock_metrics(df),
         "last_close": round(last_close, 2),
         "prev_close": round(float(df["Close"].iloc[-2]), 2) if len(df) > 1 else None,
         "last_date": df.index[-1].strftime("%Y-%m-%d"),
@@ -93,7 +95,7 @@ def run(symbols: Optional[Iterable[str]] = None, timeframes=config.TIMEFRAMES,
     nxt = config.SCAN_DIR / "next"
     shutil.rmtree(nxt, ignore_errors=True)
     (nxt / "symbols").mkdir(parents=True)
-    rows, failed, with_patterns, newest = [], [], 0, None
+    rows, failed, with_patterns, newest, infos = [], [], 0, None, {}
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
     with ProcessPoolExecutor(workers) as ex:
         futs = [ex.submit(_scan_one, s, tuple(timeframes)) for s in todo]
@@ -107,12 +109,15 @@ def run(symbols: Optional[Iterable[str]] = None, timeframes=config.TIMEFRAMES,
                 (nxt / "symbols" / f"{res['symbol']}.json").write_text(
                     json.dumps({"info": res["info"], "patterns": pats}, separators=(",", ":")))
                 rows += [{k: p.get(k) for k in INDEX_COLS} for p in pats]
+                infos[res["symbol"]] = res["info"]
                 ld = res["info"]["last_date"]
                 newest = ld if newest is None or ld > newest else newest
             if progress:
                 progress(i, len(todo))
     idx = pd.DataFrame(rows, columns=INDEX_COLS)
     idx.to_csv(nxt / "index.csv.gz", index=False, compression="gzip")
+
+    postprocess(nxt, rows, infos)
     meta = {
         "finished_at": datetime.now().isoformat(timespec="seconds"),
         "seconds": round(time.time() - t0, 1),
@@ -136,3 +141,50 @@ def run(symbols: Optional[Iterable[str]] = None, timeframes=config.TIMEFRAMES,
     nxt.rename(cur)
     shutil.rmtree(old, ignore_errors=True)
     return meta
+
+
+def postprocess(out_dir, rows: list[dict], infos: dict) -> None:
+    """Market-wide reliability per pattern type, then per-stock conviction and intraday picks."""
+    rel = cv.reliability(rows)
+    by_sym: dict[str, list] = {}
+    for r in rows:
+        by_sym.setdefault(r["symbol"], []).append(r)
+    stocks, picks = [], []
+    for sym, info in infos.items():
+        pats = by_sym.get(sym, [])
+        m = info["metrics"]
+        conv = cv.conviction(pats, m, info["last_close"], rel)
+        chg = (info["last_close"] / info["prev_close"] - 1) * 100 if info.get("prev_close") else None
+        stocks.append({**{k: v for k, v in info.items() if k != "metrics"}, **m,
+                       "chg_pct": None if chg is None else round(chg, 2),
+                       "patterns": len(pats),
+                       "live": sum(cv.is_live(p) for p in pats),
+                       "conviction": conv})
+        picks += cv.intraday_candidates(sym, pats, m, info["last_close"], conv, rel)
+    ranked = sorted(stocks, key=lambda x: -(x.get("turnover_cr") or 0))
+    for i, st in enumerate(ranked, 1):
+        st["liq_rank"] = i
+    best: dict[tuple, dict] = {}
+    for pk in picks:                      # one pick per stock and side: the highest score
+        k = (pk["symbol"], pk["side"])
+        if k not in best or pk["score"] > best[k]["score"]:
+            best[k] = pk
+    picks = sorted(best.values(), key=lambda x: -x["score"])
+    (out_dir / "stocks.json").write_text(json.dumps(stocks, separators=(",", ":")))
+    (out_dir / "intraday.json").write_text(json.dumps(picks, separators=(",", ":")))
+    (out_dir / "reliability.json").write_text(json.dumps(rel, separators=(",", ":")))
+
+
+def recompute_current() -> None:
+    """Re-derive conviction / picks for the current scan without rescanning prices."""
+    cur = config.SCAN_DIR / "current"
+    idx = pd.read_csv(cur / "index.csv.gz")
+    idx = idx.astype(object).where(idx.notna(), None)
+    rows = idx.to_dict("records")
+    for r in rows:
+        if isinstance(r.get("volume_confirmed"), str):
+            r["volume_confirmed"] = r["volume_confirmed"] == "True"
+    infos = {}
+    for f in (cur / "symbols").glob("*.json"):
+        infos[f.stem] = json.loads(f.read_text())["info"]
+    postprocess(cur, rows, infos)

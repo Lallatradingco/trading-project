@@ -17,6 +17,18 @@ STATUS_BONUS = {"Confirmed": 10, "Forming": 6, "Marginal": 3, "Failed": -12}
 FACETS = ("family", "direction", "tf", "status", "quality")
 
 
+def rank_series(idx: pd.DataFrame, stocks: dict) -> pd.Series:
+    """'Best first' order: shape quality, recency and status, minus distance from
+    the breakout level for shapes that haven't broken, minus illiquidity."""
+    vs = pd.to_numeric(idx.get("vs_breakout"), errors="coerce").abs().fillna(0)
+    unbroken = idx["status"].isin(["Forming", "Marginal"])
+    turnover = idx["symbol"].map(lambda s: (stocks.get(s) or {}).get("turnover_cr") or 0)
+    return (idx["score"] + 30 * np.exp(-idx["bars_ago"] / 10)
+            + idx["status"].map(STATUS_BONUS).fillna(0)
+            - np.where(unbroken, np.minimum(25, vs), 0)
+            - np.where(turnover < 1, 10, 0))
+
+
 class Store:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -30,17 +42,23 @@ class Store:
             self._sym.clear()
             self.lists = universe.load_lists()
             self.names = universe.load_names()
+            self.stocks, self.intraday, self.rel = {}, [], {}
+            if (cur / "stocks.json").exists():
+                self.stocks = {s["symbol"]: s for s in json.loads((cur / "stocks.json").read_text())}
+                self.intraday = json.loads((cur / "intraday.json").read_text())
+                self.rel = json.loads((cur / "reliability.json").read_text())
+                for n in (100, 200, 500):     # liquidity tiers work even without index lists
+                    self.lists[f"liq{n}"] = {s for s, v in self.stocks.items() if v.get("liq_rank", 10**9) <= n}
             if (cur / "index.csv.gz").exists():
                 idx = pd.read_csv(cur / "index.csv.gz")
                 self.meta = json.loads((cur / "meta.json").read_text())
             else:
-                idx = pd.DataFrame(columns=["id", "symbol", "tf", "pattern", "family", "direction",
-                                            "status", "quality", "score", "bars_ago"])
+                from .scanner import INDEX_COLS
+                idx = pd.DataFrame(columns=INDEX_COLS)
                 self.meta = {}
             idx["bars_ago"] = pd.to_numeric(idx["bars_ago"], errors="coerce").fillna(10**6)
             idx["score"] = pd.to_numeric(idx["score"], errors="coerce").fillna(0)
-            idx["rank"] = (idx["score"] + 30 * np.exp(-idx["bars_ago"] / 10)
-                           + idx["status"].map(STATUS_BONUS).fillna(0))
+            idx["rank"] = rank_series(idx, self.stocks)
             self.idx = idx
 
     def symbol(self, sym: str) -> dict | None:
@@ -116,13 +134,15 @@ class Store:
             view = view.sort_values(["score", "bars_ago"], ascending=[False, True])
         else:
             view = view.sort_values("rank", ascending=False)
-        per = min(int(f.get("per_page", 48)), 200)
+        per = max(1, min(int(f.get("per_page", 48)), 200))
         page = max(1, int(f.get("page", 1)))
         items = []
         for row in view.iloc[(page - 1) * per: page * per].itertuples():
             d = self.symbol(row.symbol)
             if d and row.id in d["by_id"]:
-                items.append({**d["by_id"][row.id], "name": d["info"]["name"]})
+                conv = self.stocks.get(row.symbol, {}).get("conviction", {})
+                items.append({**d["by_id"][row.id], "name": d["info"]["name"],
+                              "conviction": conv.get("bull_pct"), "conviction_label": conv.get("label")})
         return {
             "total": int(len(df)),
             "in_view": int(len(view)),
@@ -140,8 +160,14 @@ class Store:
         if d is None:
             return None
         pats = d["patterns"]
+        st = self.stocks.get(sym.upper(), {})
+        rel = {k: v for k, v in self.rel.items()
+               if any(k == f"{p['pattern']}|{p['tf']}" for p in pats) or k == "__all__"}
         return {
-            "info": d["info"],
+            "info": {**d["info"], **{k: st.get(k) for k in ("atr", "atr_pct", "sma50", "sma200", "turnover_cr",
+                                                             "ret20", "hi52", "lo52", "liq_rank", "chg_pct")}},
+            "conviction": st.get("conviction"),
+            "reliability": rel,
             "summary": {
                 "patterns": len(pats),
                 "timeframes": sorted({p["tf"] for p in pats}, key=["1D", "1W", "1M"].index),

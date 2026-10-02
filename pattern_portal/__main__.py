@@ -51,10 +51,12 @@ def main(argv=None) -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("setup", help="choose the scan universe, download history and scan")
-    s.add_argument("--universe", choices=UNIVERSES, default="all")
+    s.add_argument("--universe", choices=[u for u in UNIVERSES if not u.startswith("liq")], default="all")
     r = sub.add_parser("refresh", help="update data and rescan the saved universe")
     r.add_argument("--no-topup", action="store_true", help="skip the Yahoo top-up of recent days")
     sub.add_parser("scan", help="rescan cached data only (no downloads)")
+    e = sub.add_parser("export", help="write a static, read-only copy of the latest scan")
+    e.add_argument("out")
     v = sub.add_parser("serve", help="run the portal")
     v.add_argument("--host", default=config.HOST)
     v.add_argument("--port", type=int, default=config.PORT)
@@ -69,6 +71,11 @@ def main(argv=None) -> None:
         refresh(config.load_settings()["universe"], topup=not a.no_topup)
     elif a.cmd == "scan":
         refresh(config.load_settings()["universe"], sync=False)
+    elif a.cmd == "export":
+        from pathlib import Path
+        from .export import export
+        m = export(Path(a.out))
+        print(f"Exported {m['patterns_exported']} recent patterns in {m['pattern_files']} files to {a.out}/data")
     elif a.cmd == "serve":
         print(f"Pattern portal on http://{a.host}:{a.port}  (Ctrl+C to stop)")
         create_app().run(host=a.host, port=a.port, debug=False, threaded=True)

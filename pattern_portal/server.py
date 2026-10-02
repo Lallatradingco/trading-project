@@ -128,9 +128,10 @@ def create_app() -> Flask:
             "job": job.state,
             "scan_universe": config.load_settings()["universe"],
             "universes": [{"key": k, "label": universe.LABELS[k],
-                           "available": k == "all" or k in lists,
+                           "available": k == "all" or bool(lists.get(k)),
                            "size": len(lists.get(k, ())) if k != "all" else None}
                           for k in universe.UNIVERSES],
+            "reliability_all": store.rel.get("__all__"),
         })
 
     @app.get("/api/patterns")
@@ -153,6 +154,28 @@ def create_app() -> Flask:
         if d is None:
             return jsonify({"error": "not found"}), 404
         return jsonify(d)
+
+    @app.get("/api/intraday")
+    def intraday():
+        return jsonify(store.intraday)
+
+    @app.get("/api/lists")
+    def lists():
+        return jsonify({k: sorted(v) for k, v in store.lists.items()})
+
+    @app.get("/api/stocks")
+    def stocks():
+        keep = ("symbol", "last_close", "chg_pct", "ret20", "turnover_cr", "liq_rank", "patterns",
+                "live", "conviction", "last_date")
+        rows = []
+        for s in store.stocks.values():
+            r = {k: s.get(k) for k in keep}
+            r["name"] = store.names.get(s["symbol"], "")
+            c = r["conviction"] or {}
+            r["conviction"] = {k: c.get(k) for k in ("bull_pct", "label", "strength", "pattern_bull",
+                                                    "pattern_bear", "evidence")}
+            rows.append(r)
+        return jsonify(rows)
 
     @app.post("/api/scan")
     def scan():

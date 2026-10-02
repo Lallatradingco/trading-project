@@ -301,6 +301,7 @@ def trendline_patterns(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candida
                 height_up=height, height_dn=height, stop_up=last_lo, stop_dn=last_hi,
                 target_up=float(seg.max()) if name == "Falling Wedge" else None,
                 target_dn=float(seg.min()) if name == "Rising Wedge" else None,
+                up_x0=highs[0].idx, dn_x0=lows[0].idx, other_is_boundary=True,
                 points=[(p.idx, p.price, "") for p in w],
                 segments=_poly(w),
             )
@@ -310,21 +311,23 @@ def trendline_patterns(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candida
 
 # ----------------------------------------------------------- flags & pennants
 
-def _envelope(x: np.ndarray, y: np.ndarray, upper: bool) -> tuple[Line, int]:
+def _envelope(x: np.ndarray, y: np.ndarray, upper: bool, anchor0: bool) -> tuple[Line, int]:
     """Line through local extremes, shifted so it bounds every close.
 
-    Returns the line and the number of distinct swing points touching it.
+    `anchor0` puts bar 0 (the pole tip) on this line: the upper line of a bull
+    flag, the lower line of a bear flag. Returns the line and the number of
+    distinct swing points touching it.
     """
     yy = y if upper else -y
     ext = [i for i in range(1, len(y) - 1) if yy[i] >= yy[i - 1] and yy[i] >= yy[i + 1]]
-    idx = sorted(set([0] + ext + [len(y) - 1])) if upper else sorted(set(ext + [len(y) - 1]))
+    idx = sorted(set(([0] if anchor0 else []) + ext + [len(y) - 1]))
     if len(idx) >= 2:
         m, b = np.polyfit(x[idx], yy[idx], 1)
     else:
         m, b = 0.0, float(yy.max())
     b += float(np.max(yy - (m * x + b)))
     tol = 0.15 * (np.ptp(y) + 1e-9)
-    cand = ([0] if upper else []) + ext
+    cand = ([0] if anchor0 else []) + ext
     touches = sum(1 for i in cand if abs(yy[i] - (m * x[i] + b)) <= tol)
     if upper:
         return Line(float(m), float(b)), touches
@@ -359,13 +362,18 @@ def flags_pennants(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candidate]:
             """Flag/pennant geometry of bars b..e, or None if not a valid consolidation."""
             win = c[b.idx:e + 1]
             x = np.arange(b.idx, e + 1)
-            U, tu = _envelope(x, win, True)
-            L, tl = _envelope(x, win, False)
+            U, tu = _envelope(x, win, True, s == 1)
+            L, tl = _envelope(x, win, False, s == -1)
             w0, w1 = U.at(b.idx) - L.at(b.idx), U.at(e) - L.at(e)
-            if len(win) < 5 or tu < 2 or tl < 2 or w0 <= 0 or w0 > 0.6 * pole:
+            if len(win) < 5 or tu < 2 or tl < 2 or w0 <= 0 or w1 <= 0 or w0 > 0.45 * pole:
                 return None
+            apex = None
+            if U.m != L.m:
+                xa = (L.b - U.b) / (U.m - L.m)
+                if xa > e:
+                    apex = xa
             drift = s * ((U.at(e) + L.at(e)) / 2 - (U.at(b.idx) + L.at(b.idx)) / 2) / pole
-            if drift > 0.12:             # consolidation must not run with the pole
+            if drift > 0.12 or drift < -0.35:   # not with the pole, and not a steep V-rebound
                 return None
             r = w1 / w0
             if r < 0.5:
@@ -374,7 +382,7 @@ def flags_pennants(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candidate]:
                 kind = "Flag"
             else:
                 return None
-            return U, L, tu, tl, w0, kind
+            return U, L, tu, tl, w0, kind, apex
 
         end = geo = None
         for t in range(b.idx + 4, min(n, b.idx + max_len + 1)):
@@ -383,8 +391,12 @@ def flags_pennants(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candidate]:
                 break                    # retraced more than half the pole
             g = shape(t - 1)
             if g is not None:
-                U, L = g[0], g[1]
-                if (s == 1 and c[t] > U.at(t)) or (s == -1 and c[t] < L.at(t)):
+                U, L, apex = g[0], g[1], g[6]
+                if apex is not None and t >= apex:
+                    break                # lines have met: the pennant is spent
+                d = max(0.005, 0.35 * float(ctx.atrp[t]))
+                lvl = U.at(t) if s == 1 else L.at(t)
+                if s * (c[t] - lvl) / lvl >= d:      # decisive close out of the flag
                     end, geo = t - 1, g
                     break
             elif s * (c[t] - b.price) > 0:
@@ -397,27 +409,28 @@ def flags_pennants(ctx: Ctx, piv: list[Pivot], scale: float) -> list[Candidate]:
                     end, geo = last, g
         if end is None:
             continue
-        U, L, tu, tl, w0, kind = geo
+        U, L, tu, tl, w0, kind, apex = geo
         win = c[b.idx:end + 1]
         name = ("Bull " if s == 1 else "Bear ") + kind
         retr = s * (b.price - (win.min() if s == 1 else win.max())) / pole
         steep = _clip((gain / pbars) / (1.5 * ap))
-        score = 0.3 * steep + 0.3 * (1 - retr / 0.5) + 0.2 * (1 - w0 / (0.6 * pole)) + 0.2 * _clip((tu + tl - 3) / 4)
+        score = 0.3 * steep + 0.3 * (1 - retr / 0.5) + 0.2 * (1 - w0 / (0.45 * pole)) + 0.2 * _clip((tu + tl - 3) / 4)
         cand = Candidate(
             pattern=name, bias="bull" if s == 1 else "bear",
             start=a.idx, end=end, score=score, scale=scale,
-            expiry=b.idx + max_len,
+            expiry=b.idx + max_len if apex is None else min(b.idx + max_len, int(apex) - 1),
             points=[(a.idx, a.price, ""), (b.idx, b.price, "Pole")],
             segments=[_seg("pole", a.idx, a.price, b.idx, b.price)],
         )
         cand.line_x0 = b.idx
-        lim = b.price - s * 0.5 * pole
+        # the opposite flag line doubles as the invalidation line
+        cand.other_is_boundary = True
         if s == 1:
             cand.up, cand.height_up, cand.stop_up = U, pole, float(win.min())
-            cand.dn = Line.flat(lim)
+            cand.dn = L
         else:
             cand.dn, cand.height_dn, cand.stop_dn = L, pole, float(win.max())
-            cand.up = Line.flat(lim)
+            cand.up = U
         out.append(cand)
     return out
 
