@@ -560,9 +560,54 @@ function convictionBlock(c, byTf) {
     </section>`;
 }
 
+const LIVE_WINDOW = { "1D": 30, "1W": 12, "1M": 6 };
+const isLive = p => ["Forming", "Marginal"].includes(p.status) ||
+  (p.status === "Confirmed" && p.outcome === "Open" && p.bars_ago <= LIVE_WINDOW[p.tf]);
+
+function liveBlock(live, current) {
+  if (!live.length) return `<section class="live"><h3>Patterns live now</h3><p class="hint">No pattern is forming or freshly broken out on this stock right now.</p></section>`;
+  const tfOrder = { "1M": 0, "1W": 1, "1D": 2 };
+  live.sort((a, b) => tfOrder[a.tf] - tfOrder[b.tf] || a.bars_ago - b.bars_ago);
+  return `<section class="live"><h3>Patterns live now <span class="when">${live.length}, all timeframes</span></h3>
+    <div class="live-grid">${live.map(q => {
+      const lvl = q.direction === "neutral"
+        ? `Range ${rs(q.range_dn)} to ${rs(q.range_up)}`
+        : `Breakout ${rs(q.breakout)}, target ${rs(q.target)}, stop ${rs(q.stop)}`;
+      const dist = q.direction !== "neutral" && q.vs_breakout != null && q.status !== "Confirmed"
+        ? ` ${Math.abs(q.vs_breakout).toFixed(1)}% ${q.vs_breakout >= 0 ? "above" : "below"} the level` : "";
+      return `<button class="live-item ${q.id === current ? "sel" : ""}" data-id="${esc(q.id)}">
+        <span class="li-top"><span class="dir ${q.direction}">${dirSym[q.direction]}</span><b>${esc(q.pattern)}</b><span class="tag">${TF_WORD[q.tf]}</span><span class="pill ${q.status}">${esc(q.status)}</span></span>
+        <svg class="mini-s" viewBox="0 0 260 80" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <span class="li-lv">${lvl}</span>
+        <span class="li-sub">${esc(q.quality)} shape${dist}${q.rr ? `, R:R 1 : ${q.rr}` : ""}</span>
+      </button>`;
+    }).join("")}</div></section>`;
+}
+
+function techBlock(t) {
+  if (!t || !t.items) return "";
+  const s = t.summary;
+  const rows = t.items.map(it => `<li class="${it.reading}">
+      <span class="t-l">${esc(it.label)}</span>
+      <span class="t-v">${it.value == null ? "" : (it.unit === "₹" ? rs(it.value) : nf.format(it.value) + (it.unit && it.unit !== "₹" ? it.unit : ""))}</span>
+      <span class="t-r">${it.reading === "bull" ? "Bullish" : it.reading === "bear" ? "Bearish" : "Neutral"}</span>
+      <span class="t-n">${esc(it.note)}</span></li>`).join("");
+  const ret = Object.entries(t.returns || {}).map(([k, v]) => `<div><span class="k">${k}</span><span class="${v >= 0 ? "up" : "down"}">${pct(v)}</span></div>`).join("");
+  const piv = Object.entries(t.pivots || {}).map(([k, v]) => `<div><span class="k">${k}</span><span>${rs(v)}</span></div>`).join("");
+  return `<section class="tech">
+    <div class="conv-head"><h3>Technicals <span class="when">daily, ${fmtDate(t.as_of)}</span></h3>
+      <span class="conv-read ${s.label.includes("bull") ? "up" : s.label.includes("bear") ? "down" : "mid"}">${esc(s.label)}</span></div>
+    <p class="hint">${s.bull} bullish, ${s.bear} bearish, ${s.neutral} neutral readings. Shown alongside the patterns; they are not part of the conviction ratio.</p>
+    <ul class="t-list">${rows}</ul>
+    <h4>Returns</h4><div class="mini-row">${ret}</div>
+    <h4>Pivot levels for the next session</h4><div class="mini-row">${piv}</div>
+  </section>`;
+}
+
 function renderDetail(d, id, box = $("#detail"), inModal = false) {
   const pats = d.patterns;
-  const p = pats.find(x => x.id === id) || pats.find(x => x.chart) || pats[0];
+  const live = pats.filter(isLive);
+  const p = pats.find(x => x.id === id) || live.find(x => x.chart) || pats.find(x => x.chart) || pats[0];
   const i = d.info, s = d.summary;
   const chg = i.chg_pct ?? (i.prev_close ? (i.last_close / i.prev_close - 1) * 100 : null);
   const rel = p ? d.reliability?.[`${p.pattern}|${p.tf}`] : null;
@@ -582,6 +627,7 @@ function renderDetail(d, id, box = $("#detail"), inModal = false) {
       <div><div class="k">Forming now</div><div class="v">${s.forming}</div><div class="s">not yet broken out</div></div>
     </div>
     ${convictionBlock(d.conviction, d.conviction_tf)}
+    ${liveBlock(live, p?.id)}
     ${p ? `
     <div class="d-title"><span class="dir ${p.direction}">${dirSym[p.direction]}</span><h3>${esc(p.pattern)}</h3></div>
     <div class="d-sub">
@@ -608,7 +654,17 @@ function renderDetail(d, id, box = $("#detail"), inModal = false) {
         : `<div><dt>Breakout</dt><dd>${rs(p.breakout)}</dd></div><div><dt>Target</dt><dd class="up">${rs(p.target)}</dd></div><div><dt>Stop</dt><dd class="down">${rs(p.stop)}</dd></div>`}
     </dl>
     <p class="hint">${p.rr ? `Reward to risk 1 : ${p.rr}, measured from the breakout level.` : ""}</p>` : `<p class="hint">No patterns recorded for this stock.</p>`}
+    ${techBlock(i.tech)}
     <div class="history"><h3>All ${s.patterns} patterns on ${esc(i.symbol)}, newest first</h3><ol></ol></div>`;
+  for (const btn of $$(".live-item", box)) {
+    const q = live.find(x => x.id === btn.dataset.id);
+    if (q?.chart) drawChart($(".mini-s", btn), q, false);
+    btn.onclick = () => {
+      if (!inModal) selected = { symbol: i.symbol, id: q.id };
+      renderDetail(d, q.id, box, inModal);
+      $(".d-title", box)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
+  }
   avatar($(".avatar", box), i.symbol);
   if (p?.chart) drawChart($(".big", box), p, true);
   $(".close-detail", box).onclick = () => (inModal ? closeModal() : box.classList.remove("open"));

@@ -22,6 +22,7 @@ import pandas as pd
 from . import config, data
 from .engine import analyze
 from .engine import conviction as cv
+from .engine.technicals import technicals
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ def _scan_one(sym: str, timeframes: tuple[str, ...]) -> dict:
     info = {
         "symbol": sym,
         "metrics": cv.stock_metrics(df),
+        "tech": technicals(df),
         "last_close": round(last_close, 2),
         "prev_close": round(float(df["Close"].iloc[-2]), 2) if len(df) > 1 else None,
         "last_date": df.index[-1].strftime("%Y-%m-%d"),

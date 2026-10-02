@@ -84,6 +84,20 @@ Every stock gets a bullish share of its chart evidence (`engine/conviction.py`):
   40–60 mixed, 25–40 bearish, under 25 strong bearish. Evidence strength
   (low/medium/high) says how much weight sits behind the reading.
 
+## Stock search
+
+Type a symbol or company name in the search box and pick a stock. A popup
+shows its conviction (overall and per timeframe), every pattern live right now
+(forming, edging past its level, or freshly broken out) with its chart and
+levels, the full technical read and the stock's pattern history.
+
+Technicals (`engine/technicals.py`, daily unless stated): RSI 14 and weekly RSI,
+MACD 12/26/9, stochastic 14/3, 20/50/200-day averages and the 50/200 cross,
+ADX 14 with +DI/-DI, Supertrend 10/3, Bollinger 20/2 position, volume vs its
+20-day average, 52-week closing range, returns over 1W to 1Y, and classic pivot
+levels for the next session. Each gets a bullish, bearish or neutral reading.
+They are shown next to the patterns and are not part of the conviction ratio.
+
 ## Intraday picks
 
 A next-session watchlist from daily patterns (there is no intraday feed):

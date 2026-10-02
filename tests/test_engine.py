@@ -70,3 +70,24 @@ def test_no_pattern_ever_reports_a_non_positive_level():
             for r in analyze(resample(df, tf), tf):
                 for k in ("breakout", "target", "stop", "range_up", "range_dn"):
                     assert r[k] is None or r[k] > 0, (f, tf, r["id"] if "id" in r else r["pattern"], k, r[k])
+
+
+def test_technicals_match_reference_rsi_and_have_readings():
+    import numpy as np
+    from pattern_portal.engine.technicals import technicals
+    df = case("Rectangle")
+    t = technicals(df)
+    c = df["Close"].to_numpy()
+    d = np.diff(c)
+    g, lo = np.clip(d, 0, None), np.clip(-d, 0, None)
+    ag, al = g[:14].mean(), lo[:14].mean()
+    for i in range(14, len(d)):
+        ag, al = (ag * 13 + g[i]) / 14, (al * 13 + lo[i]) / 14
+    ref = 100 - 100 / (1 + ag / al)
+    rsi = next(it for it in t["items"] if it["key"] == "rsi")["value"]
+    assert abs(rsi - ref) < 1.0
+    assert all(it["reading"] in ("bull", "bear", "neutral") for it in t["items"])
+    s = t["summary"]
+    assert s["bull"] + s["bear"] + s["neutral"] == len(t["items"])
+    p = t["pivots"]
+    assert p["S2"] <= p["S1"] <= p["P"] <= p["R1"] <= p["R2"]
