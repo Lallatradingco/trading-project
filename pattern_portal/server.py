@@ -166,7 +166,7 @@ def create_app() -> Flask:
     @app.get("/api/stocks")
     def stocks():
         keep = ("symbol", "last_close", "chg_pct", "ret20", "turnover_cr", "liq_rank", "patterns",
-                "live", "conviction", "last_date")
+                "live", "conviction", "conviction_tf", "last_date")
         rows = []
         for s in store.stocks.values():
             r = {k: s.get(k) for k in keep}

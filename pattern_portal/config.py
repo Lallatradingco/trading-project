@@ -19,7 +19,7 @@ PORT = int(os.environ.get("PATTERN_PORTAL_PORT", "8765"))
 EOD2_RAW = "https://raw.githubusercontent.com/BennyThadikaran/eod2_data/main"
 EOD2_TREE = "https://api.github.com/repos/BennyThadikaran/eod2_data/git/trees/main?recursive=1"
 
-MIN_HISTORY_BARS = int(os.environ.get("PATTERN_PORTAL_MIN_BARS", "500"))   # ~2 years of daily candles
+MIN_HISTORY_BARS = int(os.environ.get("PATTERN_PORTAL_MIN_BARS", "250"))   # ~1 year of daily candles
 MAX_STALE_DAYS = 20                   # skip symbols that stopped trading
 TIMEFRAMES = ("1D", "1W", "1M")
 

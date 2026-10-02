@@ -105,6 +105,7 @@ const StaticSource = (() => {
         p.name = st.name || "";
         p.conviction = st.conviction?.bull_pct ?? null;
         p.conviction_label = st.conviction?.label ?? null;
+        p.conviction_tf = Object.fromEntries(Object.entries(st.conviction_tf || {}).map(([k, v]) => [k, v.bull_pct]));
         const unbroken = p.status === "Forming" || p.status === "Marginal";
         p.rank = p.score + 30 * Math.exp(-p.bars_ago / 10) + (STATUS_BONUS[p.status] || 0)
           - (unbroken ? Math.min(25, Math.abs(p.vs_breakout || 0)) : 0)
@@ -144,6 +145,12 @@ const StaticSource = (() => {
       }
       if (f.sort === "recent") v.sort((a, b) => a.bars_ago - b.bars_ago || b.score - a.score);
       else if (f.sort === "cleanest") v.sort((a, b) => b.score - a.score || a.bars_ago - b.bars_ago);
+      else if (f.sort === "bullish" || f.sort === "bearish") {
+        const tf = f.tf?.length === 1 ? f.tf[0] : null;
+        const cv = p => (tf ? p.conviction_tf?.[tf] : p.conviction) ?? 50;
+        const dir = f.sort === "bullish" ? -1 : 1;
+        v.sort((a, b) => dir * (cv(a) - cv(b)) || b.rank - a.rank);
+      }
       else v.sort((a, b) => b.rank - a.rank);
       const page = f.page || 1;
       return {
@@ -168,7 +175,7 @@ const StaticSource = (() => {
       const by = tf => pats.filter(p => p.tf === tf).length;
       return {
         info: st,
-        conviction: st.conviction, reliability: rel,
+        conviction: st.conviction, conviction_tf: st.conviction_tf, reliability: rel,
         summary: {
           patterns: pats.length,
           timeframes: ["1D", "1W", "1M"].filter(tf => by(tf)),
@@ -409,10 +416,11 @@ function renderGrid(res, append) {
     $(".rr", c).textContent = p.rr ? `R:R 1 : ${p.rr}` : "";
     $(".ql", c).textContent = p.quality + (p.volume_confirmed ? ", volume ✓" : "");
     $(".vs", c).textContent = `Close ${rs(p.last_close)}` + (p.vs_breakout != null && p.direction !== "neutral" ? ` ${pct(p.vs_breakout)}` : "");
-    const cv = p.conviction;
+    const tfSel = state.tf.length === 1 ? state.tf[0] : null;
+    const cv = tfSel ? (p.conviction_tf?.[tfSel] ?? null) : p.conviction;
     $(".cvbar i", c).style.width = (cv ?? 50) + "%";
     if (convClass(cv)) $(".cvrow", c).classList.add(convClass(cv));
-    $(".cvtxt", c).textContent = "Stock conviction " + convText(cv);
+    $(".cvtxt", c).textContent = `Stock conviction${tfSel ? " (" + TF_WORD[tfSel] + ")" : ""} ` + convText(cv);
     if (selected?.id === p.id) c.classList.add("sel");
     c.onclick = () => select(p.symbol, p.id);
     c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(p.symbol, p.id); } };
@@ -465,35 +473,40 @@ async function renderIntraday() {
 
 // ---------------------------------------------------------------- conviction view
 let stocksCache = null;
-const cvState = { filter: "all", trend: false, liquid: true, sort: "conv", dir: -1, shown: 100 };
+const cvState = { filter: "all", trend: false, liquid: true, tf: "all", sort: "conv", dir: -1, shown: 100 };
+const convFor = s => (cvState.tf === "all" ? s.conviction : s.conviction_tf?.[cvState.tf]) || null;
 async function renderConviction() {
   if (!stocksCache) stocksCache = await SRC.stocks();
   const set = await universeMembers(state.universe);
   const q = state.q.trim().toUpperCase();
-  let rows = stocksCache.filter(s => s.conviction && s.conviction.bull_pct != null && (!set || set.has(s.symbol)) &&
+  let rows = stocksCache.filter(s => convFor(s)?.bull_pct != null && (!set || set.has(s.symbol)) &&
     (!q || s.symbol.includes(q) || (s.name || "").toUpperCase().includes(q)));
-  if (!cvState.trend) rows = rows.filter(s => (s.conviction.pattern_bull || 0) + (s.conviction.pattern_bear || 0) > 0);
+  if (!cvState.trend) rows = rows.filter(s => (convFor(s).pattern_bull || 0) + (convFor(s).pattern_bear || 0) > 0);
   if (cvState.liquid) rows = rows.filter(s => (s.turnover_cr || 0) >= 1);
-  if (cvState.filter === "bull") rows = rows.filter(s => s.conviction.bull_pct >= 60);
-  if (cvState.filter === "bear") rows = rows.filter(s => s.conviction.bull_pct <= 40);
-  if (cvState.filter === "strong") rows = rows.filter(s => /^Strong/.test(s.conviction.label || ""));
+  if (cvState.filter === "bull") rows = rows.filter(s => convFor(s).bull_pct >= 60);
+  if (cvState.filter === "bear") rows = rows.filter(s => convFor(s).bull_pct <= 40);
+  if (cvState.filter === "strong") rows = rows.filter(s => /^Strong/.test(convFor(s).label || ""));
   const key = cvState.sort;
-  const val = s => key === "conv" ? Math.abs(s.conviction.bull_pct - 50) * 100 + (s.conviction.evidence || 0)
-    : key === "label" ? s.conviction.bull_pct : key === "evidence" ? s.conviction.evidence : s[key];
+  const val = s => key === "conv" || key === "label" ? convFor(s).bull_pct
+    : key === "evidence" ? convFor(s).evidence
+    : key === "live" ? (cvState.tf === "all" ? s.live : convFor(s).live) : s[key];
   rows.sort((a, b) => {
     const x = val(a), y = val(b);
     if (typeof x === "string" || typeof y === "string") return cvState.dir * String(x).localeCompare(String(y));
-    return cvState.dir * ((x ?? -1e15) - (y ?? -1e15));
+    // ties: stronger evidence first
+    return cvState.dir * ((x ?? -1e15) - (y ?? -1e15)) || (convFor(b).evidence || 0) - (convFor(a).evidence || 0);
   });
+  for (const b of $$("#cv-order button")) b.setAttribute("aria-pressed", key === "conv" && +b.dataset.v === cvState.dir);
+  for (const b of $$("#cv-tf button")) b.setAttribute("aria-pressed", b.dataset.v === cvState.tf);
   const body = $("#cv-body");
   body.innerHTML = rows.slice(0, cvState.shown).map(s => {
-    const c = s.conviction, p = c.bull_pct;
+    const c = convFor(s), p = c.bull_pct;
     return `<tr tabindex="0" data-sym="${esc(s.symbol)}">
       <td><strong>${esc(s.symbol)}</strong>${s.name ? `<span class="sub">${esc(s.name)}</span>` : ""}</td>
       <td class="num"><span class="meter"><i style="width:${p}%"></i></span> ${p}%</td>
       <td class="${convClass(p)}">${esc(c.label)}</td>
       <td class="num">${esc(c.strength || "")}</td>
-      <td class="num">${int(s.live)}</td>
+      <td class="num">${int(cvState.tf === "all" ? s.live : c.live)}</td>
       <td class="num">${rs(s.last_close)} <span class="sub ${s.chg_pct >= 0 ? "up" : "down"}">${pct(s.chg_pct)}</span></td>
       <td class="num ${s.ret20 >= 0 ? "up" : "down"}">${pct(s.ret20)}</td>
       <td class="num">₹${nf1.format(s.turnover_cr || 0)} cr</td></tr>`;
@@ -524,8 +537,12 @@ async function select(sym, id, open = true) {
   if (open) $("#detail").classList.add("open");
 }
 
-function convictionBlock(c) {
+function convictionBlock(c, byTf) {
   if (!c || c.bull_pct == null) return "";
+  const tfRow = byTf ? `<div class="tf-conv">${["1D", "1W", "1M"].map(tf => {
+    const x = byTf[tf];
+    return `<div><span class="k">${TF_WORD[tf][0].toUpperCase() + TF_WORD[tf].slice(1)}</span><span class="${convClass(x?.bull_pct)}">${x?.bull_pct == null ? "—" : convText(x.bull_pct)}</span><span class="s">${x ? int(x.live) + " live" : ""}</span></div>`;
+  }).join("")}</div>` : "";
   const p = c.bull_pct;
   const total = (c.bull || 0) + (c.bear || 0) || 1;
   const drivers = (c.drivers || []).map(dv => `<li><span class="dir ${dv.side}">${dirSym[dv.side]}</span>
@@ -537,17 +554,17 @@ function convictionBlock(c) {
       <div class="conv-head"><h3>Conviction</h3><span class="conv-read ${convClass(p)}">${esc(c.label)}</span></div>
       <div class="split" role="img" aria-label="${p}% bullish, ${100 - p}% bearish"><i class="b" style="width:${p}%"></i><i class="s" style="width:${100 - p}%"></i></div>
       <div class="split-lab"><span class="up">Bullish ${p}%</span><span>${esc(c.strength)} evidence</span><span class="down">Bearish ${100 - p}%</span></div>
+      ${tfRow}
       ${drivers ? `<h4>Patterns behind it, share of the weight</h4><ol class="drivers">${drivers}</ol>` : `<p class="hint">No live pattern on this stock, so the reading comes from trend alone.</p>`}
       <h4>Trend checks, ${trendShare}% of the weight</h4><ul class="trend">${trend}</ul>
     </section>`;
 }
 
-function renderDetail(d, id) {
+function renderDetail(d, id, box = $("#detail"), inModal = false) {
   const pats = d.patterns;
   const p = pats.find(x => x.id === id) || pats.find(x => x.chart) || pats[0];
   const i = d.info, s = d.summary;
   const chg = i.chg_pct ?? (i.prev_close ? (i.last_close / i.prev_close - 1) * 100 : null);
-  const box = $("#detail");
   const rel = p ? d.reliability?.[`${p.pattern}|${p.tf}`] : null;
   box.innerHTML = `
     <div class="d-head">
@@ -564,7 +581,7 @@ function renderDetail(d, id) {
       <div><div class="k">Reached target</div><div class="v">${s.target_hit}</div><div class="s">${s.stopped} hit the stop first</div></div>
       <div><div class="k">Forming now</div><div class="v">${s.forming}</div><div class="s">not yet broken out</div></div>
     </div>
-    ${convictionBlock(d.conviction)}
+    ${convictionBlock(d.conviction, d.conviction_tf)}
     ${p ? `
     <div class="d-title"><span class="dir ${p.direction}">${dirSym[p.direction]}</span><h3>${esc(p.pattern)}</h3></div>
     <div class="d-sub">
@@ -594,7 +611,7 @@ function renderDetail(d, id) {
     <div class="history"><h3>All ${s.patterns} patterns on ${esc(i.symbol)}, newest first</h3><ol></ol></div>`;
   avatar($(".avatar", box), i.symbol);
   if (p?.chart) drawChart($(".big", box), p, true);
-  $(".close-detail", box).onclick = () => box.classList.remove("open");
+  $(".close-detail", box).onclick = () => (inModal ? closeModal() : box.classList.remove("open"));
   const ol = $(".history ol", box);
   for (const q of pats.slice(0, 150)) {
     const li = document.createElement("li");
@@ -603,10 +620,69 @@ function renderDetail(d, id) {
     li.innerHTML = `<span class="dir ${q.direction}">${dirSym[q.direction]}</span>
       <span><span>${esc(q.pattern)}</span> <span class="when">${q.tf}, ${fmtDate(q.breakout_date || q.end_date)}</span></span>
       <span class="res">${esc(q.outcome || q.status)}</span>`;
-    li.onclick = () => { selected = { symbol: i.symbol, id: q.id }; renderDetail(d, q.id); };
+    li.onclick = () => {
+      if (!inModal) selected = { symbol: i.symbol, id: q.id };
+      renderDetail(d, q.id, box, inModal);
+    };
     li.onkeydown = e => { if (e.key === "Enter") li.onclick(); };
     ol.appendChild(li);
   }
+}
+
+// ---------------------------------------------------------------- stock search popup
+let sugItems = [], sugIdx = -1;
+async function suggest(text) {
+  const q = text.trim().toUpperCase();
+  const ul = $("#suggest");
+  if (!q) { ul.hidden = true; $("#q").setAttribute("aria-expanded", "false"); return; }
+  if (!stocksCache) stocksCache = await SRC.stocks();
+  const starts = [], has = [];
+  for (const s of stocksCache) {
+    const name = (s.name || "").toUpperCase();
+    if (s.symbol.startsWith(q)) starts.push(s);
+    else if (s.symbol.includes(q) || name.includes(q)) has.push(s);
+  }
+  const byValue = (a, b) => (b.turnover_cr || 0) - (a.turnover_cr || 0);
+  sugItems = [...starts.sort(byValue), ...has.sort(byValue)].slice(0, 8);
+  sugIdx = sugItems.length ? 0 : -1;
+  ul.innerHTML = sugItems.length ? sugItems.map((s, k) => {
+    const c = s.conviction?.bull_pct;
+    return `<li role="option" id="sug-${k}" data-sym="${esc(s.symbol)}" aria-selected="${k === 0}">
+      <span class="avatar" style="background:hsl(${hue(s.symbol)} 32% 64%)">${esc(s.symbol.slice(0, 2))}</span>
+      <span class="who"><strong>${esc(s.symbol)}</strong><span class="name">${esc(s.name || "")} ${rs(s.last_close)}</span></span>
+      <span class="${convClass(c)}">${c == null ? "" : convText(c)}</span>
+      <span class="n">${int(s.live)} live</span></li>`;
+  }).join("") : `<li class="none">No NSE stock matches "${esc(text.trim())}" in this scan.</li>`;
+  ul.hidden = false;
+  $("#q").setAttribute("aria-expanded", "true");
+  for (const li of $$("li[data-sym]", ul)) li.onmousedown = e => { e.preventDefault(); openStock(li.dataset.sym); };
+}
+function moveSuggest(step) {
+  if (!sugItems.length) return;
+  sugIdx = (sugIdx + step + sugItems.length) % sugItems.length;
+  $$("#suggest li[data-sym]").forEach((li, k) => li.setAttribute("aria-selected", k === sugIdx));
+  $("#q").setAttribute("aria-activedescendant", "sug-" + sugIdx);
+}
+function hideSuggest() { $("#suggest").hidden = true; $("#q").setAttribute("aria-expanded", "false"); }
+let lastFocus = null;
+async function openStock(sym) {
+  hideSuggest();
+  const d = stockCache.get(sym) || await SRC.stock(sym);
+  if (!d) return;
+  stockCache.set(sym, d);
+  // lead with the most relevant pattern: a live one with a chart, else the newest with a chart
+  const live = d.patterns.filter(p => p.chart && ["Forming", "Marginal"].includes(p.status) || (p.chart && p.status === "Confirmed" && p.outcome === "Open"));
+  const lead = live[0] || d.patterns.find(p => p.chart) || d.patterns[0];
+  lastFocus = document.activeElement;
+  renderDetail(d, lead?.id, $("#modal-body"), true);
+  $("#modal").hidden = false;
+  document.body.classList.add("modal-open");
+  $("#modal .close-detail")?.focus();
+}
+function closeModal() {
+  $("#modal").hidden = true;
+  document.body.classList.remove("modal-open");
+  lastFocus?.focus?.();
 }
 
 // ---------------------------------------------------------------- meta + views
@@ -687,7 +763,18 @@ async function startScan() {
 function wire() {
   buildFilters();
   let t;
+  $("#q").addEventListener("keydown", e => {
+    if ($("#suggest").hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); moveSuggest(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSuggest(-1); }
+    else if (e.key === "Enter" && sugIdx >= 0) { e.preventDefault(); openStock(sugItems[sugIdx].symbol); }
+    else if (e.key === "Escape") hideSuggest();
+  });
+  $("#q").addEventListener("focus", e => { if (e.target.value.trim()) suggest(e.target.value); });
+  $("#q").addEventListener("blur", () => setTimeout(hideSuggest, 120));
+  $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
   $("#q").addEventListener("input", e => {
+    suggest(e.target.value);
     clearTimeout(t);
     t = setTimeout(() => {
       state.q = e.target.value;
@@ -710,6 +797,8 @@ function wire() {
     renderConviction();
   };
   $("#cv-trend").onchange = e => { cvState.trend = e.target.checked; renderConviction(); };
+  for (const b of $$("#cv-tf button")) b.onclick = () => { cvState.tf = b.dataset.v; cvState.shown = 100; renderConviction(); };
+  for (const b of $$("#cv-order button")) b.onclick = () => { cvState.sort = "conv"; cvState.dir = +b.dataset.v; renderConviction(); };
   $("#cv-liquid").onchange = e => { cvState.liquid = e.target.checked; renderConviction(); };
   $("#cv-more").onclick = () => { cvState.shown += 100; renderConviction(); };
   for (const th of $$(".cv-table th")) {
@@ -722,7 +811,11 @@ function wire() {
     th.onclick = go;
     th.onkeydown = e => { if (e.key === "Enter") go(); };
   }
-  document.addEventListener("keydown", e => { if (e.key === "Escape") $("#detail").classList.remove("open"); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!$("#modal").hidden) closeModal();
+    else $("#detail").classList.remove("open");
+  });
 }
 
 wire();

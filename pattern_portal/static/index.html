@@ -22,10 +22,14 @@
     <button data-view="conviction" aria-pressed="false">Conviction</button>
   </nav>
   <span id="mkt" class="mkt"></span>
-  <label class="search">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2"/></svg>
-    <input id="q" type="search" placeholder="Search a stock" autocomplete="off" aria-label="Search a stock">
-  </label>
+  <div class="search-wrap">
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2"/></svg>
+      <input id="q" type="search" placeholder="Search a stock, e.g. TATASTEEL" autocomplete="off" aria-label="Search a stock"
+             role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+    </label>
+    <ul id="suggest" class="suggest" role="listbox" aria-label="Matching stocks" hidden></ul>
+  </div>
   <div class="top-right">
     <span id="job" class="job" hidden></span>
     <button id="rescan" class="btn">Scan again</button>
@@ -65,6 +69,8 @@
         <button role="tab" data-sort="composite" aria-selected="true">Best first</button>
         <button role="tab" data-sort="recent">Newest</button>
         <button role="tab" data-sort="cleanest">Cleanest</button>
+        <button role="tab" data-sort="bullish">Most bullish</button>
+        <button role="tab" data-sort="bearish">Most bearish</button>
       </div>
       <button id="filters-toggle" class="btn ghost only-narrow">Filters</button>
     </div>
@@ -96,6 +102,18 @@
     <div class="vhead">
       <h2>Conviction by stock</h2>
       <p>Bullish share of the chart evidence on each stock: live patterns weighted by shape quality, status, timeframe, recency and measured hit rate, plus a smaller trend component (50- and 200-day averages, 20-session return). 50% means the evidence is balanced.</p>
+    </div>
+    <div class="cv-tools">
+      <div class="seg cv-seg" id="cv-tf" role="group" aria-label="Timeframe">
+        <button data-v="all" aria-pressed="true">All timeframes</button>
+        <button data-v="1D" aria-pressed="false">Daily</button>
+        <button data-v="1W" aria-pressed="false">Weekly</button>
+        <button data-v="1M" aria-pressed="false">Monthly</button>
+      </div>
+      <div class="seg cv-seg" id="cv-order" role="group" aria-label="Order">
+        <button data-v="-1" aria-pressed="true">Most bullish first</button>
+        <button data-v="1" aria-pressed="false">Most bearish first</button>
+      </div>
     </div>
     <div class="cv-tools">
       <div class="chips" id="cv-filter" role="group" aria-label="Reading">
@@ -132,6 +150,12 @@
     </div>
   </aside>
 </main>
+
+<div id="modal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-label="Stock patterns">
+    <div id="modal-body" class="detail-body"></div>
+  </div>
+</div>
 
 <template id="card-tpl">
   <article class="card" tabindex="0">

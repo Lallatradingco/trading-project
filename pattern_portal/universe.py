@@ -27,11 +27,12 @@ INDEX_URLS = {
 FNO_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
 EQUITY_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 
-UNIVERSES = ("nifty50", "nifty100", "nifty200", "fno", "nifty500",
-             "liq100", "liq200", "liq500", "all")
+# Order of the universe toggle in the portal; lists that aren't available are hidden.
+UNIVERSES = ("fno", "nifty500", "all", "nifty50", "nifty100", "nifty200")
 LABELS = {"nifty50": "Nifty 50", "nifty100": "Nifty 100", "nifty200": "Nifty 200",
-          "fno": "F&O", "nifty500": "Nifty 500", "liq100": "Top 100 by turnover",
-          "liq200": "Top 200 by turnover", "liq500": "Top 500 by turnover", "all": "All stocks"}
+          "fno": "F&O stocks", "nifty500": "Nifty 500", "all": "All NSE",
+          "liq100": "Top 100 by turnover", "liq200": "Top 200 by turnover", "liq500": "Top 500 by turnover"}
+BUNDLED = config.ROOT / "lists"     # fallback copies of the F&O and Nifty 500 lists
 
 
 def _get(session: requests.Session, url: str) -> str:
@@ -77,11 +78,13 @@ def refresh(session: requests.Session) -> dict[str, int]:
 
 
 def load_lists() -> dict[str, set[str]]:
+    """Downloaded lists first, then the copies bundled with the portal."""
     out = {}
     for key in ("nifty50", "nifty100", "nifty200", "nifty500", "fno"):
-        p = config.META_DIR / f"{key}.txt"
-        if p.exists():
-            out[key] = set(p.read_text().split())
+        for p in (config.META_DIR / f"{key}.txt", BUNDLED / f"{key}.txt"):
+            if p.exists() and p.read_text().split():
+                out[key] = set(p.read_text().split())
+                break
     return out
 
 

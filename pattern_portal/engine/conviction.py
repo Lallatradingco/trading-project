@@ -10,6 +10,7 @@ Conviction weighs every *live* pattern on a stock:
                tend to run the other way).
 * timeframe    daily 1.0, weekly 1.6, monthly 2.2 (bigger patterns, more weight)
 * recency      exp(-candles since the event / tau), tau = 10 daily, 4 weekly, 2 monthly
+               (three times longer for shapes that haven't broken out yet)
 * reliability  how often this pattern type on this timeframe reached its target
                before its stop across the whole scanned market (shrunk towards
                50% when there are few cases), relative to a coin flip
@@ -120,10 +121,10 @@ def _rel(p: dict, rel: dict) -> float:
 # ------------------------------------------------------------------ conviction
 
 def is_live(p: dict) -> bool:
+    if p["status"] in ("Forming", "Marginal"):
+        return True                      # still unresolved (expired shapes are already dropped)
     if p["bars_ago"] > WINDOW[p["tf"]]:
         return False
-    if p["status"] in ("Forming", "Marginal"):
-        return True
     if p["status"] == "Confirmed":
         return p.get("outcome") in (None, "Open")
     return p["status"] == "Failed"
@@ -133,7 +134,9 @@ def pattern_weight(p: dict, rel: dict) -> tuple[str, float]:
     """(side, weight) a live pattern adds to a stock's conviction."""
     if p["direction"] == "neutral":
         return "none", 0.0
-    rec = math.exp(-p["bars_ago"] / TAU[p["tf"]])
+    # an unresolved shape is still current, so it fades three times slower than a breakout
+    tau = TAU[p["tf"]] * (3 if p["status"] in ("Forming", "Marginal") else 1)
+    rec = math.exp(-p["bars_ago"] / tau)
     base = (p["score"] / 100) * TF_W[p["tf"]] * rec * _rel(p, rel)
     if p.get("volume_confirmed"):
         base *= 1.15

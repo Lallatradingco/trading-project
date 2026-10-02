@@ -132,6 +132,13 @@ class Store:
             view = view.sort_values(["bars_ago", "score"], ascending=[True, False])
         elif sort == "cleanest":
             view = view.sort_values(["score", "bars_ago"], ascending=[False, True])
+        elif sort in ("bullish", "bearish"):
+            # by the stock's conviction; a single timeframe filter uses that timeframe's reading
+            tfs = f.get("tf") or []
+            key = tfs[0] if len(tfs) == 1 else None
+            conv = view["symbol"].map(lambda s: self.conv_pct(s, key))
+            view = (view.assign(_c=conv.fillna(50))
+                    .sort_values(["_c", "rank"], ascending=[sort == "bearish", False]))
         else:
             view = view.sort_values("rank", ascending=False)
         per = max(1, min(int(f.get("per_page", 48)), 200))
@@ -141,8 +148,11 @@ class Store:
             d = self.symbol(row.symbol)
             if d and row.id in d["by_id"]:
                 conv = self.stocks.get(row.symbol, {}).get("conviction", {})
+                st = self.stocks.get(row.symbol, {})
                 items.append({**d["by_id"][row.id], "name": d["info"]["name"],
-                              "conviction": conv.get("bull_pct"), "conviction_label": conv.get("label")})
+                              "conviction": conv.get("bull_pct"), "conviction_label": conv.get("label"),
+                              "conviction_tf": {k: v.get("bull_pct")
+                                                for k, v in (st.get("conviction_tf") or {}).items()}})
         return {
             "total": int(len(df)),
             "in_view": int(len(view)),
@@ -154,6 +164,11 @@ class Store:
             "facets": facets,
             "items": items,
         }
+
+    def conv_pct(self, sym: str, tf: str | None):
+        st = self.stocks.get(sym) or {}
+        c = (st.get("conviction_tf") or {}).get(tf) if tf else st.get("conviction")
+        return (c or {}).get("bull_pct")
 
     def stock(self, sym: str) -> dict | None:
         d = self.symbol(sym)
@@ -167,6 +182,7 @@ class Store:
             "info": {**d["info"], **{k: st.get(k) for k in ("atr", "atr_pct", "sma50", "sma200", "turnover_cr",
                                                              "ret20", "hi52", "lo52", "liq_rank", "chg_pct")}},
             "conviction": st.get("conviction"),
+            "conviction_tf": st.get("conviction_tf"),
             "reliability": rel,
             "summary": {
                 "patterns": len(pats),

@@ -155,11 +155,17 @@ def postprocess(out_dir, rows: list[dict], infos: dict) -> None:
         m = info["metrics"]
         conv = cv.conviction(pats, m, info["last_close"], rel)
         chg = (info["last_close"] / info["prev_close"] - 1) * 100 if info.get("prev_close") else None
+        by_tf = {}
+        for tf in ("1D", "1W", "1M"):
+            c = cv.conviction([p for p in pats if p["tf"] == tf], m, info["last_close"], rel)
+            by_tf[tf] = {k: c[k] for k in ("bull_pct", "label", "strength", "pattern_bull",
+                                           "pattern_bear", "evidence")}
+            by_tf[tf]["live"] = sum(cv.is_live(p) for p in pats if p["tf"] == tf)
         stocks.append({**{k: v for k, v in info.items() if k != "metrics"}, **m,
                        "chg_pct": None if chg is None else round(chg, 2),
                        "patterns": len(pats),
                        "live": sum(cv.is_live(p) for p in pats),
-                       "conviction": conv})
+                       "conviction": conv, "conviction_tf": by_tf})
         picks += cv.intraday_candidates(sym, pats, m, info["last_close"], conv, rel)
     ranked = sorted(stocks, key=lambda x: -(x.get("turnover_cr") or 0))
     for i, st in enumerate(ranked, 1):
