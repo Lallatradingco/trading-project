@@ -8,3 +8,7 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Pattern portal data (downloaded candles, scan output)
+pattern_data/
+.venv-pattern-portal/

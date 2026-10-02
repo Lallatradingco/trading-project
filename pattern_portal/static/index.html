@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pattern Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 4 4-7 5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    <span>Pattern Scanner</span>
+  </div>
+  <span id="mkt" class="mkt"></span>
+  <label class="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2"/></svg>
+    <input id="q" type="search" placeholder="Search a stock or company" autocomplete="off">
+  </label>
+  <div class="top-right">
+    <span id="job" class="job" hidden></span>
+    <button id="rescan" class="btn">Scan again</button>
+  </div>
+</header>
+
+<section class="universe">
+  <div id="universes" class="chips" role="group" aria-label="Universe"></div>
+  <p id="scanline" class="scanline"></p>
+</section>
+
+<section class="stats" id="stats" aria-label="Summary"></section>
+
+<main class="layout">
+  <aside class="filters" id="filters" aria-label="Filters">
+    <div class="filters-head"><h2>Filters</h2><button id="reset" class="link">Reset</button></div>
+    <div class="fgroup"><h3>Pattern family</h3><div class="chips" data-facet="family"></div>
+      <p class="hint">Reversal: the trend turns. Continuation: it pauses, then resumes.</p></div>
+    <div class="fgroup"><h3>Direction</h3><div class="chips" data-facet="direction"></div></div>
+    <div class="fgroup"><h3>Timeframe</h3><div class="chips" data-facet="tf"></div></div>
+    <div class="fgroup"><h3>Status</h3><div class="chips" data-facet="status"></div>
+      <p class="hint">Confirmed: a decisive close beyond the level that then held. Failed: broke out, then slipped back.</p></div>
+    <div class="fgroup"><h3>Shape quality</h3><div class="seg" data-single="quality"></div>
+      <p class="hint">How closely the drawing matches the textbook shape. Not a success rate.</p></div>
+    <div class="fgroup"><h3>Formed within (candles)</h3><div class="seg" data-single="within"></div>
+      <p class="hint">Counted in each pattern's own candles, so 10 on weekly is ten weeks.</p></div>
+    <div class="fgroup"><h3>Only</h3>
+      <label class="check"><input type="checkbox" id="volume"> Breakout on 1.5× volume</label>
+      <label class="check"><input type="checkbox" id="book"> Textbook shapes only</label>
+    </div>
+  </aside>
+
+  <section class="results" aria-label="Patterns">
+    <div class="results-head">
+      <p id="count" class="count"></p>
+      <div class="tabs" role="tablist" aria-label="Sort">
+        <button role="tab" data-sort="composite" aria-selected="true">Best first</button>
+        <button role="tab" data-sort="recent">Newest</button>
+        <button role="tab" data-sort="cleanest">Cleanest</button>
+      </div>
+      <button id="filters-toggle" class="btn ghost only-narrow">Filters</button>
+    </div>
+    <div id="grid" class="grid"></div>
+    <div class="more"><button id="more" class="btn ghost" hidden>Show more patterns</button></div>
+  </section>
+
+  <aside class="detail" id="detail" aria-label="Stock detail" aria-live="polite">
+    <div class="empty-detail">
+      <svg viewBox="0 0 120 60" aria-hidden="true"><path d="M5 50 Q35 5 60 25 T115 12" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <p>Pick a pattern to see its chart, levels and this stock's pattern history.</p>
+    </div>
+  </aside>
+</main>
+
+<template id="card-tpl">
+  <article class="card" tabindex="0">
+    <header>
+      <span class="avatar"></span>
+      <div class="who"><strong class="sym"></strong><span class="name"></span></div>
+      <span class="pill"></span>
+    </header>
+    <div class="pname"><span class="dir"></span><span class="ptxt"></span><span class="tf"></span></div>
+    <svg class="mini" viewBox="0 0 260 120" preserveAspectRatio="none" role="img"></svg>
+    <dl class="levels">
+      <div><dt>Breakout</dt><dd class="b"></dd></div>
+      <div><dt>Target</dt><dd class="t up"></dd></div>
+      <div><dt>Stop</dt><dd class="s down"></dd></div>
+    </dl>
+    <footer><span class="when"></span><span class="rr"></span></footer>
+    <footer class="sub"><span class="ql"></span><span class="vs"></span></footer>
+  </article>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

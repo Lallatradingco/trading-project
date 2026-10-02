@@ -1,0 +1,5 @@
+pandas>=1.5
+numpy>=1.23
+requests>=2.31
+flask>=2.3
+yfinance>=0.2.40   # optional: tops up the days since the weekly history refresh
