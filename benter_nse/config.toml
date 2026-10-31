@@ -1,0 +1,46 @@
+# Benter-style NSE 500 engine — settings.
+# Paths are relative to this folder (benter_nse/).
+
+[universe]
+# NSE 500 constituents (columns: Company Name, Industry, Symbol, Series, ISIN Code).
+# `python -m benter_nse universe` tries to download it; if NSE blocks the
+# download, save the file from niftyindices.com to this path yourself.
+index_csv = "data/ind_nifty500list.csv"
+index_csv_url = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+# Ignore stocks whose median daily traded value is below this (₹ crore).
+min_turnover_cr = 5.0
+
+[data]
+dir = "data"
+# How many years of daily candles to request (Kotak serves 180 days per call).
+years = 8
+# Pause between Kotak calls, in seconds. Raise it if you see 429 errors.
+request_pause_s = 0.35
+
+[model]
+# The "race": does the stock beat the median NSE 500 stock over the next N trading days?
+horizon_days = 20
+# Take a training snapshot every N trading days.
+sample_every_days = 5
+# Years of data the first walk-forward fit must have.
+min_train_years = 2
+# Regularisation strength for the logit (smaller = more cautious).
+l2_C = 0.01
+
+[costs]
+# Round-trip cost of a delivery trade in basis points (1 bp = 0.01%):
+# STT 20 + stamp 1.5 + exchange/SEBI/GST ~1 + slippage ~10 + brokerage 0.
+round_trip_bps = 35
+
+[sizing]
+# Fraction of full Kelly to bet (Benter bet well below full Kelly).
+kelly_fraction = 0.25
+# Most capital in any one stock.
+max_weight = 0.05
+# Most capital across all picks together.
+max_gross = 1.0
+# Skip bets smaller than this (not worth the order).
+min_weight = 0.005
+
+[portal]
+port = 8611

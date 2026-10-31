@@ -57,3 +57,11 @@ The login endpoint and form field names reflect Trendlyne's current Django
 flow. If Trendlyne changes its login form, the CSRF/`sessionid` extraction may
 need updating — the script raises a clear `TrendlyneAuthError` describing which
 step failed.
+
+---
+
+# Benter engine for NSE 500
+
+A two-stage ranking engine for NSE 500 stocks modelled on Bill Benter's
+horse-racing method, using Kotak Neo daily candles. Signals only; standalone
+portal on port 8611. See [`benter_nse/README.md`](benter_nse/README.md).
