@@ -8,3 +8,7 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Benter NSE engine: downloaded prices, model outputs and demo data stay local
+benter_nse/data/
+benter_nse/data_demo/
